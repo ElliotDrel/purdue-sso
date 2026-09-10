@@ -1,0 +1,13 @@
+{
+  "name": "purdue-sso",
+  "version": "1.0.3",
+  "private": true,
+  "description": "Violentmonkey userscript for Purdue SSO",
+  "scripts": {
+    "test": "node test/purdue-sso.test.mjs",
+    "check": "node --check purdue-sso.user.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
