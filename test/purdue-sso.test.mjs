@@ -137,3 +137,120 @@ for (const initiallyChecked of [false, true]) {
   assert.deepEqual(actions, initiallyChecked ? ['yes'] : ['checkbox', 'yes']);
 }
 console.log('Passed: stay-signed-in preference, Yes ordering, existing checkbox state, delayed controls, account guard, and duplicate prevention.');
+
+// Model SPA transitions: an error can arrive before its recovery controls, and
+// remain visible on the method picker after the original challenge has failed.
+function recoveryPage() {
+  const actions = [];
+  const state = { errors: [], controls: [], password: null, otp: null, account: config.email };
+  const storage = new Map();
+  const element = (text, click = () => {}) => ({
+    innerText: text, textContent: text, value: '', click,
+    getAttribute: () => null, closest: () => null, getClientRects: () => [{}],
+  });
+  const input = () => Object.assign(new Input(), {
+    getAttribute: () => null, closest: () => null, getClientRects: () => [{}],
+  });
+  const button = text => element(text, () => actions.push(text));
+  const page = vm.createContext({
+    URL, crypto: webcrypto, console, HTMLInputElement: Input, Event: context.Event,
+    Date: class extends Date { static now() { return 1_234_567_890_000; } },
+    location: { protocol: 'https:', hostname: 'login.microsoftonline.com', pathname: '/common/login' },
+    GM_getValue: (_, fallback) => fallback, GM_registerMenuCommand() {},
+    sessionStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) },
+    getComputedStyle: () => ({ visibility: 'visible' }),
+    document: {
+      body: { innerText: 'Verify your identity Enter a verification code' },
+      querySelectorAll(selector) {
+        if (selector.startsWith('#displayName')) return [{ value: state.account }];
+        if (selector.startsWith('#passwordError')) return state.errors;
+        if (selector.startsWith('button, a,')) return state.controls;
+        if (selector === 'input[type="password"]') return state.password ? [state.password] : [];
+        if (selector.startsWith('#idTxtBx_SAOTCC_OTC')) return state.otp ? [state.otp] : [];
+        return [];
+      },
+    },
+  });
+  const reload = () => vm.runInContext(source, page);
+  reload();
+  return { state, actions, element, button, input, reload, tick: () => page.testApi.tick() };
+}
+
+for (const message of [
+  "Sorry, we're having trouble verifying your account. Please try again.",
+  'Your request has timed out.',
+  'An unfamiliar authentication error',
+]) {
+  const p = recoveryPage();
+  p.state.errors = [p.element(message)];
+  await p.tick(); // The picker has not rendered yet: do not permanently stop.
+  p.state.controls = [p.button('Use a verification code')];
+  await p.tick();
+  await p.tick();
+  p.reload();
+  await p.tick();
+  assert.deepEqual(p.actions, ['Use a verification code'], 'Choose a code once, including across reloads');
+  p.state.errors = [];
+  p.state.otp = p.input();
+  p.state.controls = [p.button('Verify'), p.button('Sign in another way')];
+  await p.tick();
+  await p.tick();
+  assert.match(p.state.otp.value, /^\d{6}$/);
+  assert.deepEqual(p.actions, ['Use a verification code', 'Verify'], 'Continue into the code form');
+  p.state.errors = [p.element('Incorrect code')];
+  await p.tick();
+  p.state.errors = [];
+  p.state.otp.value = '';
+  await p.tick();
+  assert.equal(p.actions.length, 2, 'Never resubmit a rejected code or navigate away from its form');
+}
+
+for (const label of ["I can't use my Microsoft Authenticator app right now", 'Sign in another way', 'Use a different verification option']) {
+  const p = recoveryPage();
+  p.state.errors = [p.element('App approval failed')];
+  p.state.controls = [p.button(label)];
+  await p.tick();
+  await p.tick();
+  p.state.controls = [p.button('Use a verification code')];
+  await p.tick();
+  assert.deepEqual(p.actions, [label, 'Use a verification code']);
+}
+
+{
+  const p = recoveryPage();
+  p.state.errors = [p.element('Passwordless authentication failed')];
+  p.state.controls = [p.button('Use your password')];
+  await p.tick();
+  p.state.password = p.input();
+  p.state.controls = [p.button('Sign in')];
+  // An empty, earlier error node must not mask a later nonempty error.
+  p.state.errors = [p.element(''), p.element('Incorrect password')];
+  await p.tick();
+  assert.equal(p.state.password.value, '');
+  assert.deepEqual(p.actions, ['Use your password']);
+  p.state.errors = [];
+  await p.tick();
+  assert.equal(p.state.password.value, config.password);
+  p.state.errors = [p.element('Incorrect password')];
+  await p.tick();
+  p.state.errors = [];
+  await p.tick();
+  assert.deepEqual(p.actions, ['Use your password', 'Sign in'], 'Never resubmit a rejected password');
+}
+
+{
+  const p = recoveryPage();
+  p.state.errors = [p.element('MFA failed')];
+  p.state.controls = [p.button('Use a verification code')];
+  p.state.account = 'someone@other.edu';
+  await p.tick();
+  assert.deepEqual(p.actions, [], 'Recovery must respect the account guard');
+  p.state.account = config.email;
+  p.state.controls[0].disabled = true;
+  await p.tick();
+  assert.deepEqual(p.actions, [], 'Wait for an enabled alternative');
+  p.state.controls[0].disabled = false;
+  await p.tick();
+  assert.deepEqual(p.actions, ['Use a verification code']);
+}
+console.log('Passed: general error recovery, delayed alternatives, MFA/password transitions, account guards, and failed-submission protection.');

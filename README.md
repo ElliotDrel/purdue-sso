@@ -30,7 +30,8 @@ For Firefox private windows, allow Violentmonkey under **Extensions and Themes �
 - On Microsoft, requires Purdue's tenant, the configured account, or a recent continuation of that login. A different detected account prevents automation.
 - Fills username/password, chooses “Use a verification code” instead of app approval, and generates a TOTP locally with Web Crypto.
 - Checks “Don't show this again” and chooses **Yes** on “Stay signed in?”.
-- Excludes hidden login fields, preserves conflicting user-entered values, stops on detected sign-in errors, and prevents duplicate submissions.
+- Excludes hidden login fields, preserves conflicting user-entered values, and prevents duplicate submissions.
+- Follows available password/code alternatives even when the previous authentication method reports an error. Errors block form submission while visible; the script keeps watching for recovery controls or a cleared message instead of permanently stopping. Rejected passwords and codes are not automatically resubmitted.
 - Waits for a fresh authenticator code when the current code has fewer than five seconds left.
 - Stops after three minutes on a single page. The Violentmonkey menu offers **pause/enable** and **retry sign-in**; retry clears the per-tab submission guard.
 
@@ -51,6 +52,6 @@ npm test
 npm run check
 ```
 
-Tests use synthetic credentials and public TOTP vectors. They cover TOTP generation, account guards, repeated submissions, input handling, the off-screen password field on Microsoft's username screen, and the stay-signed-in checkbox/Yes sequence. DOM tests simulate the forms; they do not sign in to a real account.
+Tests use synthetic credentials and public TOTP vectors. They cover TOTP generation, account guards, repeated submissions, input handling, the off-screen password field on Microsoft's username screen, the stay-signed-in checkbox/Yes sequence, and recovery through delayed authentication alternatives after an error. DOM tests simulate the forms; they do not sign in to a real account.
 
-The password/MFA flow was exercised against Purdue's live Microsoft login in September 2026. The later username and stay-signed-in fixes have regression coverage. Login pages can change; this is an unofficial project and is not affiliated with Purdue or Microsoft.
+The password/MFA flow was exercised against Purdue's live Microsoft login in September 2026. Version 1.0.4 was installed in Firefox on Tuesday, September 22, 2026; a fresh private-window login reached the authenticated Brightspace homepage without manual credential or code entry. Error recovery also has synthetic regression coverage. Login pages can change; this is an unofficial project and is not affiliated with Purdue or Microsoft.

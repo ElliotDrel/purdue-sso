@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Purdue automatic sign-in
 // @namespace https://github.com/pmxi/purdue-sso
-// @version 1.0.3
+// @version 1.0.4
 // @description Sign in to Purdue with your saved password and authenticator code.
 // @match https://sso.purdue.edu/*
 // @match https://idp.purdue.edu/*
@@ -173,14 +173,26 @@
         if (checkbox.checked) click('stay-signed-in', yes);
         return;
       }
-      const error = find('#passwordError, #usernameError, #idDiv_SAOTCC_Error, [role="alert"]');
-      if (error?.textContent.trim()) {
-        stopped = true;
-        console.info('Purdue automatic sign-in paused: review the sign-in message. Use the retry menu after resolving it.');
-        return;
-      }
       const password = find('input[type="password"]');
       const username = find('input[name="loginfmt"], input[name="j_username"], input[name="username"], #username');
+      const otp = find('#idTxtBx_SAOTCC_OTC, input[name="otc"], input[autocomplete="one-time-code"]');
+      const error = Array.from(document.querySelectorAll(
+        '#passwordError, #usernameError, #idDiv_SAOTCC_Error, #idDiv_SAOTCS_Error, #idDiv_SAOTCAS_Error, [role="alert"]',
+      )).some(element => visible(element) && element.textContent.trim());
+
+      // An error can belong to the previous MFA method (for example a timed-out
+      // app approval). Follow offered alternatives before blocking submission.
+      // Prefer the code form once it is open, and keep each navigation one-shot.
+      const useCode = control(/^use a verification code$/i);
+      if (!otp && useCode) { click('use-code', useCode); return; }
+      const usePassword = control(/^(use (?:your|a) password|sign in with (?:your|a) password)$/i);
+      if (!password && !otp && usePassword) { click('use-password', usePassword); return; }
+      const otherMethod = control(/^(?:I can.t use my .+ right now|sign in another way|use a different verification option)$/i);
+      if (!otp && !password && otherMethod) { click('other-method', otherMethod); return; }
+
+      // Block the current form while its error is visible, but keep observing:
+      // clearing the message or changing methods must not require a reload.
+      if (error) return;
       if (password) {
         const submit = control(/^(sign in|log in|login)$/i);
         if (!submit) return;
@@ -188,7 +200,6 @@
         if (fill(password, config.password)) click('password', submit);
         return;
       }
-      const otp = find('#idTxtBx_SAOTCC_OTC, input[name="otc"], input[autocomplete="one-time-code"]');
       if (otp && /enter (?:a |the )?code|verification code/i.test(text)) {
         const submit = control(/^(verify|sign in|continue)$/i);
         if (!submit || done.has('otp')) return;
@@ -209,12 +220,6 @@
         click('account', account);
         return;
       }
-      const usePassword = control(/^(use (?:your|a) password|sign in with (?:your|a) password)$/i);
-      if (usePassword) { click('use-password', usePassword); return; }
-      const useCode = control(/^use a verification code$/i);
-      if (useCode) { click('use-code', useCode); return; }
-      const otherMethod = control(/^(?:I can.t use my .+ right now|sign in another way|use a different verification option)$/i);
-      if (otherMethod) { click('other-method', otherMethod); return; }
     } catch {
       stopped = true;
       console.info('Purdue automatic sign-in paused. Check the form and configuration, then use the retry menu.');
